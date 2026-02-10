@@ -8,6 +8,7 @@ import {
   LayoutDashboard, 
   Plus,
   ChevronRight,
+  ChevronDown,
   CheckCircle2,
   Trash2,
   Timer,
@@ -38,7 +39,10 @@ import {
   Camera,
   Scan as ScanIcon,
   Image as ImageIcon,
-  FileSearch
+  FileSearch,
+  User,
+  Upload,
+  Download
 } from 'lucide-react';
 import { WorkoutSession, PersonalRecord, ActiveExercise, WorkoutSet, WorkoutTemplate, Exercise } from './types';
 import { EXERCISES as DEFAULT_EXERCISES, WORKOUT_TEMPLATES as DEFAULT_TEMPLATES } from './constants';
@@ -132,7 +136,172 @@ const formatDurationFull = (ms: number) => {
   return `${minutes}m ${seconds}s`;
 };
 
+// Helper to resize image to prevent localStorage quota exceeded
+const processImageForStorage = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = document.createElement('img');
+      img.src = event.target?.result as string;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_WIDTH = 300;
+        const MAX_HEIGHT = 300;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > MAX_WIDTH) {
+            height *= MAX_WIDTH / width;
+            width = MAX_WIDTH;
+          }
+        } else {
+          if (height > MAX_HEIGHT) {
+            width *= MAX_HEIGHT / height;
+            height = MAX_HEIGHT;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx?.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', 0.8)); // Compress format
+      };
+      img.onerror = (err) => reject(err);
+    };
+    reader.onerror = (err) => reject(err);
+  });
+};
+
 // --- Components ---
+
+const ProfileDialog = ({ currentImage, onUpdate, onClose }: { currentImage: string | null, onUpdate: (img: string | null) => void, onClose: () => void }) => {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const restoreInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      try {
+        const processedImage = await processImageForStorage(file);
+        onUpdate(processedImage);
+        triggerHaptic('success');
+      } catch (err) {
+        alert('Erro ao processar imagem.');
+      }
+    }
+  };
+
+  const handleBackup = () => {
+    const data = {
+      sessions: localStorage.getItem('titanlift_sessions'),
+      templates: localStorage.getItem('titanlift_templates'),
+      exercises: localStorage.getItem('titanlift_exercises'),
+      userImage: localStorage.getItem('titanlift_user_image'),
+      version: 1,
+      date: new Date().toISOString()
+    };
+    const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `titanlift-backup-${new Date().toISOString().slice(0,10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    triggerHaptic('success');
+  };
+
+  const handleRestore = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    if (!window.confirm("Isso substituirá seus dados atuais pelo backup. Deseja continuar?")) {
+      e.target.value = ''; // Reset input
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const data = JSON.parse(event.target?.result as string);
+        if (data.sessions) localStorage.setItem('titanlift_sessions', data.sessions);
+        if (data.templates) localStorage.setItem('titanlift_templates', data.templates);
+        if (data.exercises) localStorage.setItem('titanlift_exercises', data.exercises);
+        if (data.userImage) {
+          localStorage.setItem('titanlift_user_image', data.userImage);
+          onUpdate(data.userImage);
+        }
+        
+        triggerHaptic('success');
+        alert('Dados restaurados com sucesso! O aplicativo será recarregado.');
+        window.location.reload();
+      } catch (err) {
+        alert('Arquivo de backup inválido ou corrompido.');
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[200] flex items-center justify-center p-6 animate-in fade-in duration-200">
+      <div className="bg-gray-900 border border-gray-800 w-full max-w-sm rounded-[32px] p-6 shadow-2xl relative max-h-[90vh] overflow-y-auto">
+        <button onClick={onClose} className="absolute right-4 top-4 text-gray-500 hover:text-white bg-gray-800 p-1 rounded-full"><X size={20}/></button>
+        
+        <div className="text-center mb-6">
+          <div className="w-24 h-24 rounded-full mx-auto mb-4 bg-gray-800 border-2 border-dashed border-gray-700 flex items-center justify-center overflow-hidden relative group">
+            {currentImage ? (
+              <img src={currentImage} alt="Profile" className="w-full h-full object-cover" />
+            ) : (
+              <User size={40} className="text-gray-600" />
+            )}
+          </div>
+          <h2 className="text-xl font-black text-white">Configurações</h2>
+          <p className="text-gray-400 text-xs">Perfil e Dados</p>
+        </div>
+
+        <div className="space-y-3 mb-8">
+          <p className="text-[9px] font-black text-gray-500 uppercase tracking-widest mb-1 ml-1">Foto de Perfil</p>
+          <input type="file" accept="image/*" capture="user" ref={cameraInputRef} className="hidden" onChange={handleFileChange} />
+          <button onClick={() => cameraInputRef.current?.click()} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-2xl font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2 active:scale-95 transition-all">
+            <Camera size={16} /> Tirar Foto
+          </button>
+
+          <input type="file" accept="image/*" ref={fileInputRef} className="hidden" onChange={handleFileChange} />
+          <button onClick={() => fileInputRef.current?.click()} className="w-full bg-gray-800 hover:bg-gray-700 text-gray-200 py-3 rounded-2xl font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2 active:scale-95 transition-all">
+            <ImageIcon size={16} /> Galeria
+          </button>
+
+          {currentImage && (
+            <button onClick={() => { onUpdate(null); triggerHaptic('medium'); }} className="w-full bg-red-500/10 hover:bg-red-500/20 text-red-500 py-3 rounded-2xl font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2 active:scale-95 transition-all border border-red-500/20">
+              <Trash2 size={16} /> Remover Foto
+            </button>
+          )}
+        </div>
+
+        <div className="w-full h-px bg-gray-800 mb-6" />
+
+        <div className="space-y-3">
+          <p className="text-[9px] font-black text-gray-500 uppercase tracking-widest mb-1 ml-1">Segurança dos Dados</p>
+          <button onClick={handleBackup} className="w-full bg-emerald-600/10 border border-emerald-500/30 text-emerald-500 hover:bg-emerald-600/20 py-3 rounded-2xl font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2 active:scale-95 transition-all">
+            <Download size={16} /> Baixar Backup
+          </button>
+
+          <input type="file" accept=".json" ref={restoreInputRef} className="hidden" onChange={handleRestore} />
+          <button onClick={() => restoreInputRef.current?.click()} className="w-full bg-gray-800 border border-gray-700 text-gray-300 hover:bg-gray-700 py-3 rounded-2xl font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2 active:scale-95 transition-all">
+            <Upload size={16} /> Restaurar Dados
+          </button>
+          <p className="text-[10px] text-gray-600 text-center leading-tight px-4">
+            Seus dados são salvos automaticamente no navegador. Use o backup para transferir entre dispositivos.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const ExitConfirmDialog = ({ onCancel, onConfirm }: { onCancel: () => void, onConfirm: () => void }) => (
   <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[200] flex items-center justify-center p-6">
@@ -369,6 +538,19 @@ const Home = ({ prs, sessions, templates }: { prs: PersonalRecord[], sessions: W
   const [activeDuration, setActiveDuration] = useState<string>("00:00:00");
   const [activeTemplateId, setActiveTemplateId] = useState<string | null>(null);
   const [timerIsRunning, setTimerIsRunning] = useState(false);
+  
+  // Profile Picture State
+  const [profileImage, setProfileImage] = useState<string | null>(() => localStorage.getItem('titanlift_user_image'));
+  const [showProfileDialog, setShowProfileDialog] = useState(false);
+
+  const handleProfileUpdate = (img: string | null) => {
+    if (img) {
+      localStorage.setItem('titanlift_user_image', img);
+    } else {
+      localStorage.removeItem('titanlift_user_image');
+    }
+    setProfileImage(img);
+  };
 
   useEffect(() => {
     getMotivationalQuote().then(setQuote);
@@ -455,11 +637,31 @@ const Home = ({ prs, sessions, templates }: { prs: PersonalRecord[], sessions: W
   }, [sessions]);
 
   return (
-    <div className="p-6 pb-32 md:pl-28 md:pt-10 max-w-4xl mx-auto">
-      <header className="mb-8 pt-4">
-        <h1 className="text-4xl font-black text-white mb-2 tracking-tight">TitanLift</h1>
-        <p className="text-gray-400 italic text-sm">"{quote}"</p>
+    <div className="p-6 pb-32 md:pl-28 pt-[max(1rem,env(safe-area-inset-top))] md:pt-10 max-w-4xl mx-auto">
+      <header className="mb-8 pt-4 flex justify-between items-start">
+        <div>
+           <h1 className="text-4xl font-black text-white mb-2 tracking-tight">TitanLift</h1>
+           <p className="text-gray-400 italic text-sm">"{quote}"</p>
+        </div>
+        <button 
+          onClick={() => setShowProfileDialog(true)}
+          className="w-12 h-12 rounded-full bg-gray-800 border-2 border-gray-700 flex items-center justify-center overflow-hidden hover:border-indigo-500 transition-all active:scale-95 shadow-xl"
+        >
+          {profileImage ? (
+            <img src={profileImage} alt="Profile" className="w-full h-full object-cover" />
+          ) : (
+            <User size={20} className="text-gray-400" />
+          )}
+        </button>
       </header>
+
+      {showProfileDialog && (
+        <ProfileDialog 
+          currentImage={profileImage} 
+          onUpdate={handleProfileUpdate} 
+          onClose={() => setShowProfileDialog(false)} 
+        />
+      )}
 
       <div className="bg-gray-900/50 border border-gray-800 rounded-3xl p-4 mb-6">
         <div className="flex justify-between items-center mb-3 px-1">
@@ -891,6 +1093,65 @@ const WorkoutList = ({
   );
 };
 
+const HistoryItem = ({ session }: { session: WorkoutSession }) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  // Summary string
+  const exerciseNames = session.exercises.map(e => e.name).join(", ");
+  const summary = exerciseNames.length > 40 ? exerciseNames.substring(0, 40) + "..." : exerciseNames;
+
+  return (
+    <div className="bg-gray-900 border border-gray-800 rounded-3xl overflow-hidden transition-all hover:border-gray-700">
+      <button 
+        onClick={() => setIsExpanded(!isExpanded)}
+        className="w-full p-5 text-left"
+      >
+        <div className="flex justify-between items-start mb-2">
+          <div>
+             <h3 className="font-bold text-white text-base">{session.templateName}</h3>
+             <div className="flex items-center gap-2 text-[10px] text-gray-500 uppercase tracking-wider font-bold mt-1">
+                <CalendarDays size={10} /> {new Date(session.date).toLocaleDateString()}
+                <span>•</span>
+                <Clock size={10} /> {formatDurationFull(session.durationMs || 0)}
+             </div>
+          </div>
+          <div className={`p-2 bg-gray-800 rounded-full text-gray-400 transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`}>
+             <ChevronDown size={16} />
+          </div>
+        </div>
+        
+        {!isExpanded && (
+           <p className="text-xs text-gray-500 line-clamp-1">{summary}</p>
+        )}
+      </button>
+
+      {isExpanded && (
+        <div className="px-5 pb-5 pt-0 animate-in slide-in-from-top-2 fade-in duration-200">
+           <div className="w-full h-px bg-gray-800 mb-4" />
+           <div className="space-y-4">
+             {session.exercises.map((ex, i) => (
+                <div key={i}>
+                   <div className="flex justify-between items-baseline mb-1">
+                      <span className="text-sm font-bold text-indigo-400">{ex.name}</span>
+                      <span className="text-[10px] text-gray-600 font-black uppercase">{ex.sets.filter(s=>s.completed).length} Séries</span>
+                   </div>
+                   <div className="flex flex-wrap gap-1.5">
+                      {ex.sets.filter(s => s.completed).map((s, j) => (
+                         <span key={j} className="text-[10px] bg-gray-950 border border-gray-800 px-2 py-1 rounded-md text-gray-400 tabular-nums">
+                            {s.weight}kg x {s.reps}
+                         </span>
+                      ))}
+                      {ex.sets.filter(s => s.completed).length === 0 && <span className="text-[10px] text-gray-600 italic">Sem séries concluídas</span>}
+                   </div>
+                </div>
+             ))}
+           </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // Componente Wrapper para garantir que a key mude e resete o estado ao trocar de treino
 const ActiveWorkoutWrapper = (props: any) => {
   const { id } = useParams();
@@ -993,10 +1254,20 @@ const ActiveWorkout = ({
 
     if (isResuming) {
       const lastIdx = parseInt(localStorage.getItem(LAST_ACTIVE_IDX_KEY) || '0');
-      setTimeout(() => {
-        setFocusedExerciseIdx(lastIdx);
-        exerciseRefs.current[lastIdx]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }, 400);
+      
+      // Tentativa robusta de rolagem com múltiplos timeouts para garantir que o DOM esteja pronto
+      const attemptScroll = (delay: number) => {
+        setTimeout(() => {
+          if (exerciseRefs.current[lastIdx]) {
+            setFocusedExerciseIdx(lastIdx);
+            exerciseRefs.current[lastIdx]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        }, delay);
+      };
+      
+      attemptScroll(100);
+      attemptScroll(400);
+      attemptScroll(800);
     }
 
     return () => clearInterval(interval);
@@ -1042,10 +1313,17 @@ const ActiveWorkout = ({
     const oldValue = updated[exerciseIndex].sets[setIndex][field];
     updated[exerciseIndex].sets[setIndex] = { ...updated[exerciseIndex].sets[setIndex], [field]: value };
     
+    // Salva o índice ativo a cada interação para garantir que 'retomar' funcione perfeitamente
+    localStorage.setItem(LAST_ACTIVE_IDX_KEY, exerciseIndex.toString());
+    
+    // Se o usuário interage, vamos assumir foco nesse exercício sem rolar
+    if (focusedExerciseIdx !== exerciseIndex) {
+      setFocusedExerciseIdx(exerciseIndex);
+    }
+
     if (field === 'completed' && value === true && oldValue === false) {
       const exId = updated[exerciseIndex].exerciseId;
       window.dispatchEvent(new CustomEvent('titanlift_start_rest', { detail: { exerciseId: exId } }));
-      localStorage.setItem(LAST_ACTIVE_IDX_KEY, exerciseIndex.toString());
       
       triggerHaptic('medium');
       playTickSound();
@@ -1060,6 +1338,7 @@ const ActiveWorkout = ({
   const updateNote = (exerciseIndex: number, value: string) => {
     const updated = [...activeExercises];
     updated[exerciseIndex].notes = value;
+    localStorage.setItem(LAST_ACTIVE_IDX_KEY, exerciseIndex.toString());
     setActiveExercises(updated);
     persistExerciseConfig(exerciseIndex);
   };
@@ -1144,7 +1423,7 @@ const ActiveWorkout = ({
   if (!template) return <div className="p-10 text-center text-gray-500">Plano não encontrado</div>;
 
   return (
-    <div className="p-4 pb-32 md:pl-28 md:pt-10 max-w-4xl mx-auto">
+    <div className="p-4 pb-32 md:pl-28 pt-[max(1rem,env(safe-area-inset-top))] md:pt-10 max-w-4xl mx-auto">
       <div className="fixed top-12 left-0 right-0 z-[100] bg-gray-950/95 backdrop-blur-lg px-6 pt-[env(safe-area-inset-top)] pb-2.5 border-b border-gray-800 shadow-2xl md:left-20">
           <div className="max-w-4xl mx-auto">
             <div className="flex justify-between items-center mb-1.5">
@@ -1217,18 +1496,23 @@ const ActiveWorkout = ({
                   ) : (
                     <div className="flex items-center gap-1.5">
                       <h2 className={`text-[15px] font-black transition-colors ${isFocused ? 'text-indigo-400' : 'text-gray-100'}`}>{ex.name}</h2>
-                      <div className="flex items-center gap-0.5">
+                      <div className="flex items-center gap-0.5 ml-2">
                         <button 
                           onClick={(e) => { e.stopPropagation(); setEditingNoteIndex(editingNoteIndex === exIdx ? null : exIdx); triggerHaptic('light'); }} 
-                          className={`p-1 rounded-lg transition-colors ${ex.notes ? 'text-indigo-400 bg-indigo-500/10' : 'text-gray-600 hover:text-indigo-400'}`}
+                          className={`p-1.5 rounded-lg transition-colors ${ex.notes ? 'text-indigo-400 bg-indigo-500/10' : 'text-gray-600 hover:text-indigo-400'}`}
                         >
                           <NotebookPen size={14} />
                         </button>
                         <button 
                           onClick={(e) => { e.stopPropagation(); handleAiTip(exIdx, ex.name); }} 
-                          className={`p-1 rounded-lg transition-all ${tipData?.response ? 'text-amber-400 bg-amber-500/10' : 'text-gray-600 hover:text-indigo-400'}`}
+                          className={`flex items-center gap-1 px-2 py-1 rounded-lg transition-all text-[9px] font-black uppercase tracking-wider border shadow-sm active:scale-95 ${
+                            tipData?.response 
+                              ? 'text-amber-400 bg-amber-500/10 border-amber-500/20' 
+                              : 'text-white bg-indigo-600 border-indigo-500/50 hover:bg-indigo-500'
+                          }`}
                         >
-                          {tipData?.loading ? <Loader2 size={14} className="animate-spin text-indigo-400" /> : <Sparkles size={14} />}
+                          {tipData?.loading ? <Loader2 size={10} className="animate-spin" /> : <Sparkles size={10} fill="currentColor" />}
+                          IA
                         </button>
                       </div>
                       {isManageMode && <button onClick={() => setEditingExIndex(exIdx)} className="text-gray-500 hover:text-indigo-400"><Edit2 size={11} /></button>}
@@ -1463,19 +1747,7 @@ const App = () => {
                <h1 className="text-3xl font-black mb-6">Histórico</h1>
                <div className="space-y-4">
                  {sessions.map(session => (
-                   <div key={session.id} className="bg-gray-900 border border-gray-800 p-4 rounded-3xl">
-                      <div className="flex justify-between items-start mb-2">
-                        <div>
-                          <h3 className="font-bold text-white">{session.templateName}</h3>
-                          <p className="text-gray-500 text-xs">{new Date(session.date).toLocaleDateString()} • {formatDurationFull(session.durationMs || 0)}</p>
-                        </div>
-                      </div>
-                      <div className="flex gap-2 overflow-x-auto pb-2">
-                        {session.exercises.map((ex, i) => (
-                          <span key={i} className="text-[9px] bg-gray-800 px-2 py-1 rounded-lg text-gray-400 whitespace-nowrap">{ex.name}</span>
-                        ))}
-                      </div>
-                   </div>
+                    <HistoryItem key={session.id} session={session} />
                  ))}
                  {sessions.length === 0 && <p className="text-gray-500 text-center py-10">Nenhum treino realizado.</p>}
                </div>
