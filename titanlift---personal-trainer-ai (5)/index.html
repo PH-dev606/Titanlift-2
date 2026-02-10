@@ -4,16 +4,27 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="theme-color" content="#020617">
+    
+    <!-- iOS PWA Support -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="TitanLift">
+
     <title>TitanLift</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;900&display=swap" rel="stylesheet">
     <link rel="manifest" href="/manifest.json">
     <style>
+        html, body {
+            overscroll-behavior-y: none; /* Previne o 'bounce' no iOS */
+            height: 100%;
+        }
         body { 
             font-family: 'Inter', sans-serif; 
             background-color: #020617;
             color: #f8fafc;
             -webkit-tap-highlight-color: transparent;
+            -webkit-touch-callout: none; /* Desabilita menu de contexto ao segurar */
         }
         .titan-card { 
             background: linear-gradient(145deg, rgba(30, 41, 59, 0.4), rgba(15, 23, 42, 0.6));
@@ -39,7 +50,6 @@
   }
 }
 </script>
-<link rel="stylesheet" href="/index.css">
 </head>
 <body>
     <div id="root"></div>
